@@ -23,7 +23,7 @@ ENABLE_LZ4KD=true
 info "请选择要编译的机型："
 info "1. 一加 Ace 5 Pro"
 info "2. 一加 13"
-info "3.❌ 一加 13T（暂时会报错请不要使用）"
+info "3.一加 13T"
 read -p "输入选择 [1-3]: " device_choice
 
 case $device_choice in
@@ -108,7 +108,7 @@ cd "$WORKSPACE" || error "无法进入工作目录"
 
 # 检查并安装依赖
 info "检查并安装依赖..."
-DEPS=(python3 git curl ccache flex bison libssl-dev libelf-dev bc)
+DEPS=(python3 git curl ccache flex bison libssl-dev libelf-dev bc zip)
 MISSING_DEPS=()
 
 for pkg in "${DEPS[@]}"; do
@@ -197,10 +197,20 @@ cp -r ../SukiSU_patch/other/zram/lz4k/lib/* ./common/lib
 cp -r ../SukiSU_patch/other/zram/lz4k/crypto/* ./common/crypto
 cp -r ../SukiSU_patch/other/zram/lz4k_oplus ./common/lib/
 
-# 应用补丁
-cd common || error "进入common目录失败"
-sed -i 's/-32,12 +32,38/-32,11 +32,37/g' 50_add_susfs_in_gki-android15-6.6.patch
-sed -i '/#include <trace\/hooks\/fs.h>/d' 50_add_susfs_in_gki-android15-6.6.patch
+cd $KERNEL_WORKSPACE/kernel_platform/common || { echo "进入common目录失败"; exit 1; }
+
+
+# 判断当前编译机型是否为一加13t
+if [ "$DEVICE_NAME" = "oneplus_13t" ]; then
+    info "当前编译机型为一加13T, 跳过patch补丁应用"
+else
+    info "DEVICE_NAME is $DEVICE_NAME, 正在应用patch补丁..."
+    
+    # 应用补丁
+
+    sed -i 's/-32,12 +32,38/-32,11 +32,37/g' 50_add_susfs_in_gki-android15-6.6.patch
+    sed -i '/#include <trace\/hooks\/fs.h>/d' 50_add_susfs_in_gki-android15-6.6.patch
+fi
 
 patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch || info "SUSFS补丁应用可能有警告"
 cp "$KERNEL_WORKSPACE/SukiSU_patch/hooks/syscall_hooks.patch" ./ || error "复制syscall_hooks.patch失败"
@@ -348,10 +358,22 @@ export PATH="$KERNEL_WORKSPACE/kernel_platform/prebuilts/clang/host/linux-x86/cl
 export PATH="/usr/lib/ccache:$PATH"
 
 cd common || error "进入common目录失败"
-make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang \
+# 判断当前编译机型是否为一加13t
+if [ "$DEVICE_NAME" = "oneplus_13t" ]; then
+    info "当前编译机型为一加13T，KCFLAGS参数跳过-O2"
+    make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang \
     RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc \
     PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole \
-    LD=ld.lld HOSTLD=ld.lld O=out KCFLAGS+=-Wno-error gki_defconfig all || error "内核构建失败"
+    LD=ld.lld HOSTLD=ld.lld O=out gki_defconfig all || error "内核构建失败"
+else
+    info "当前编译机型为非一加13T，KCFLAGS参数加入-O2以提升生成代码的性能"
+    make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang \
+    RUSTC=../../prebuilts/rust/linux-x86/1.73.0b/bin/rustc \
+    PAHOLE=../../prebuilts/kernel-build-tools/linux-x86/bin/pahole \
+    LD=ld.lld HOSTLD=ld.lld O=out KCFLAGS+=-O2 gki_defconfig all \
+    || error "内核构建失败"
+
+fi
 
 # 应用Linux补丁
 info "应用Linux补丁..."
@@ -372,7 +394,7 @@ cp "$KERNEL_WORKSPACE/kernel_platform/common/out/arch/arm64/boot/Image" ./AnyKer
 
 # 打包
 cd AnyKernel3 || error "进入AnyKernel3目录失败"
-zip -r "../AnyKernel3_${KSU_VERSION}_${DEVICE_NAME}_SuKiSu.zip" ./* || error "打包失败"
+zip -r "AnyKernel3_${KSU_VERSION}_${DEVICE_NAME}_SuKiSu.zip" ./* || error "打包失败"
 
 # 创建C盘输出目录（通过WSL访问Windows的C盘）
 WIN_OUTPUT_DIR="/mnt/c/Kernel_Build/${DEVICE_NAME}/"
@@ -380,7 +402,7 @@ mkdir -p "$WIN_OUTPUT_DIR" || info "无法创建Windows目录，可能未挂载C
 
 # 复制Image和AnyKernel3包
 cp "$KERNEL_WORKSPACE/kernel_platform/common/out/arch/arm64/boot/Image" "$WIN_OUTPUT_DIR/"
-cp "$WORKSPACE/AnyKernel3_${KSU_VERSION}_${DEVICE_NAME}_SuKiSu_${SUKI_BRANCH}.zip" "$WIN_OUTPUT_DIR/"
+cp "$WORKSPACE/AnyKernel3/AnyKernel3_${KSU_VERSION}_${DEVICE_NAME}_SuKiSu_${SUKI_BRANCH}.zip" "$WIN_OUTPUT_DIR/"
 
 info "内核包路径: C:/Kernel_Build/${DEVICE_NAME}/AnyKernel3_${KSU_VERSION}_${DEVICE_NAME}_SuKiSu_${SUKI_BRANCH}.zip.zip"
 info "Image路径: C:/Kernel_Build/${DEVICE_NAME}/Image"
